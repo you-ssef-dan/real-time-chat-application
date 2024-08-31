@@ -1,84 +1,121 @@
-
+let userStatus = [];
 document.addEventListener("DOMContentLoaded", async function () {
     try {
         // Fetch user data from the server
-        const response = await fetch("/users", );
-
+        const response = await fetch("/users");
         // Parse JSON response
         const data = await response.json();
-
+        if (response.status === 401) {
+            alert(data.error);
+            window.location.href = "/login.html";
+        }
+        if (response.status === 422) {
+            alert(data.error);
+        }
+        if (response.status === 400) {
+            alert(data.error);
+        }
         if (response.ok) {
-            displayUsers(data)
-        } else {
-            // Handle error response
-            console.log('Error response:', data.error);
-            alert('Error: ' + data.error);
+            let user_id = data.currentUser.user_id;
+
+            const socket = io({ query: { userId: user_id } });
+            // Handle user status updates
+            socket.on("user_status", (userStatus) => {
+                userStatus = userStatus;
+                console.log( 'user connect : ',userStatus);
+                console.log('data : ',data);
+                
+                // Update the userStatus array with the new data
+                displayUsers(data, userStatus);
+            });
         }
     } catch (error) {
         // Handle network errors
         console.log("Network error. Please try again.", error);
-        alert("Network error. Please try again.");
+        // alert("Network error. Please try again.");
     }
 });
 
-function displayUsers(data){
-  const headerDetails = document.querySelector('.users header .details');
-  const imgElement = document.getElementById('imgUser');
-  imgElement.src =data.currentUser.image;
-  console.log('Image URL:', data.currentUser.image);
-  headerDetails.querySelector('span').textContent = `${data.currentUser.firstname} ${data.currentUser.lastname}`;
-  headerDetails.querySelector('p').textContent = "active";
-  // Handle successful response
-  const usersList = document.querySelector('.users-list');
-  usersList.innerHTML = ''; // Clear previous results
-  
-  // Populate the users list with data
-  data.users.forEach(user => {
-      // console.log(user.user_id);
-      // console.log(data.currentUser.user_id);
-      const from = data.currentUser.user_id;
-      const to = user.user_id;
+document.querySelector(".logout").addEventListener("click", async function (e) {
+    e.preventDefault();
+    try {
+        const response = await fetch("/logout", {
+            method: "GET",
+            redirect: "follow",
+        });
+        if (response.redirected) {
+            window.location.href = response.url; // Redirect to the login page
+        }
+    } catch (error) {
+        console.error("Error during logout:", error);
+        alert("Error during logout. Please try again.");
+    }
+});
 
-      const userItem = document.createElement('a');
-      userItem.href = `chat.html?to=${to}&from=${from}`;
+function displayUsers(data, userStatus) {
+    const headerDetails = document.querySelector(".users header .details");
+    const imgElement = document.getElementById("imgUser");
+    imgElement.src = data.currentUser.image;
+    console.log("Image URL:", data.currentUser.image);
+    headerDetails.querySelector(
+        "span"
+    ).textContent = `${data.currentUser.firstname} ${data.currentUser.lastname}`;
+    headerDetails.querySelector("p").textContent = "active";
+    // Handle successful response
+    const usersList = document.querySelector(".users-list");
+    usersList.innerHTML = ""; // Clear previous results
+    if (data.users.length > 0) {
+        // Populate the users list with data
+        data.users.forEach((user) => {
+            const from = data.currentUser.user_id;
+            const to = user.user_id;
 
-      const contentDiv = document.createElement('div');
-      contentDiv.classList.add('content');
+            const userItem = document.createElement("a");
+            userItem.href = `chat.html?to=${to}&from=${from}`;
 
-      const image = document.createElement('img');
-      image.src = user.image;
+            const contentDiv = document.createElement("div");
+            contentDiv.classList.add("content");
 
-      const detailsDiv = document.createElement('div');
-      detailsDiv.classList.add('details');
+            const image = document.createElement("img");
+            image.src = user.image;
 
-      const nameSpan = document.createElement('span');
-      nameSpan.textContent = `${user.firstname} ${user.lastname}`;
+            const detailsDiv = document.createElement("div");
+            detailsDiv.classList.add("details");
 
-      const messageP = document.createElement('p');
-      messageP.textContent = "this is test message..."; // Modify as needed
+            const nameSpan = document.createElement("span");
+            nameSpan.textContent = `${user.firstname} ${user.lastname}`;
 
-      const statusDotDiv = document.createElement('div');
-      statusDotDiv.classList.add('status-dot');
-      
-      // You can add a class or logic to display status
-      //statusDotDiv.classList.add('offline'); // Modify according to your logic
+            const messageP = document.createElement("p");
+            messageP.textContent = "this is test message..."; // Modify as needed
 
-      const statusIcon = document.createElement('i');
-      statusIcon.classList.add('fas', 'fa-circle');
+            const statusDotDiv = document.createElement("div");
+            statusDotDiv.classList.add("status-dot");
 
-      statusDotDiv.appendChild(statusIcon);
+            // You can add a class or logic to display status
+            const userStatusEntry = userStatus.find((userS) => userS.userId === user.user_id);
+            if (userStatusEntry) {
+                statusDotDiv.classList.remove("offline");
+            } else {
+                statusDotDiv.classList.add("offline");
+            }
+            // Modify according to your logic
 
-      detailsDiv.appendChild(nameSpan);
-      detailsDiv.appendChild(messageP);
-      contentDiv.appendChild(image);
-      contentDiv.appendChild(detailsDiv);
-      userItem.appendChild(contentDiv);
-      userItem.appendChild(statusDotDiv);
+            const statusIcon = document.createElement("i");
+            statusIcon.classList.add("fas", "fa-circle");
 
-      usersList.appendChild(userItem);
-  });
+            statusDotDiv.appendChild(statusIcon);
+
+            detailsDiv.appendChild(nameSpan);
+            detailsDiv.appendChild(messageP);
+            contentDiv.appendChild(image);
+            contentDiv.appendChild(detailsDiv);
+            userItem.appendChild(contentDiv);
+            userItem.appendChild(statusDotDiv);
+
+            usersList.appendChild(userItem);
+        });
+    }
 }
-
 
 // // searchBar toggle
 // const searchBar = document.querySelector(".search input"),
@@ -131,7 +168,3 @@ function displayUsers(data){
 //   }
 //   xhr.send();
 // }, 500);
-
-
-
-

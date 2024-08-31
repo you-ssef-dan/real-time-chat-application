@@ -5,9 +5,8 @@ import connection from "./config.js";
 import bcrypt from "bcrypt";
 import session from "express-session";
 import multer from "multer";
-import http from 'http';
-import { Server } from 'socket.io';
-
+import http from "http";
+import { Server } from "socket.io";
 
 const app = express();
 const server = http.createServer(app);
@@ -16,8 +15,9 @@ const io = new Server(server);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-app.use(express.static('public')); 
-app.use(express.static(__dirname ));
+// Middleware configuration
+app.use(express.static("public"));
+app.use(express.static(__dirname));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(
@@ -26,7 +26,7 @@ app.use(
       "f180a5342e06bcf9f7fccb9fc5e7e0df97d32721f927784b79ad893d3c535856a7a14e29dd5fd308d3aba339b60184ff2dc9b7167602f49d3bbfcf44d6a891f5",
     resave: false,
     saveUninitialized: true,
-    cookie: { secure: false }, // Set to true if using HTTPS
+    cookie: { secure: false }, // Set to true if using HTTPS in production
   })
 );
 
@@ -42,10 +42,12 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
+// Route to serve login page
 app.get("/login", (req, res) => {
   res.sendFile(path.join(__dirname, "login.html")); // Serve the login.html file
 });
 
+// Route to serve signup page
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "signup.html")); // Serve the signup.html file
 });
@@ -65,11 +67,6 @@ app.get("/users", async (req, res) => {
       [currentUserEmail]
     );
 
-    if (rows.length === 0) {
-      console.log("No users exist");
-      return res.status(400).json({ error: "No users exist" });
-    }
-
     // Send the current user and the list of users in the response
     res.status(200).json({
       currentUser: req.session.user,
@@ -81,7 +78,7 @@ app.get("/users", async (req, res) => {
   }
 });
 
-// -------------------   sign up ---------------------->
+// -------------------   Sign Up   ---------------------->
 app.post("/", upload.single("image"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No file uploaded" });
@@ -109,6 +106,7 @@ app.post("/", upload.single("image"), async (req, res) => {
     const saltRounds = 7;
     const hashedPassword = await bcrypt.hash(data.password, saltRounds);
     data.password = hashedPassword;
+
     await connection.query(
       "INSERT INTO users (firstname, lastname, email, password, image) VALUES (?, ?, ?, ?, ?)",
       [data.firstname, data.lastname, data.email, data.password, data.image]
@@ -121,8 +119,7 @@ app.post("/", upload.single("image"), async (req, res) => {
   }
 });
 
-//-------------------------- login ----------------
-
+// -------------------   Login   ---------------------->
 app.post("/login", async (req, res) => {
   const user = {
     email: req.body.email,
@@ -141,8 +138,8 @@ app.post("/login", async (req, res) => {
       };
       res.status(200).json({ message: "Success" });
     } else {
-      console.log("email or password incorrect");
-      res.status(400).json({ error: "email or password incorrect" });
+      console.log("Email or password incorrect");
+      res.status(400).json({ error: "Email or password incorrect" });
     }
   } catch (error) {
     console.error("Error during login:", error);
@@ -150,42 +147,51 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// ------------- get chat----------------
-
+// -------------   Get Chat   ---------------------->
 app.get("/chat", async (req, res) => {
   const { from, to } = req.query;
-  if (!req.session.user) {
+
+  if (!req.session.user || from != req.session.user.user_id) {
     return res.status(401).json({ error: "Unauthorized" });
   }
+
+  if (from === null || to === null) {
+    return res.status(400).json({ error: "Missing 'from' or 'to' parameter" });
+  }
+  // Check if 'from' and 'to' are numbers and not null
+if (isNaN(from) || isNaN(to)) {
+  return res.status(422).json({ error: "'from' and 'to' must be valid numbers" });
+}
 
   try {
     const [messages] = await connection.query(
       `SELECT * FROM messages
              LEFT JOIN users ON users.user_id = messages.outgoing_msg_id
              WHERE (outgoing_msg_id = ? AND incoming_msg_id = ?) 
-                OR (incoming_msg_id = ? AND outgoing_msg_id = ? ) ORDER BY time  `, [from, to, from, to] );
-    const [incoming_user] = await connection.query(
-        'SELECT * FROM users WHERE user_id = ?', [to]
+                OR (incoming_msg_id = ? AND outgoing_msg_id = ? ) ORDER BY time`,
+      [from, to, from, to]
     );
 
-    if (messages.length === 0) {
-      console.log("No message exist");
-      return res.status(404).json({incoming_user:incoming_user[0],error:'no message exist'});
+    const [incoming_user] = await connection.query(
+      "SELECT * FROM users WHERE user_id = ?",
+      [to]
+    );
+    if (incoming_user.length === 0) {
+      return res.status(404).json({ error: "incoming user not found" });
     }
-
     // Send the current user and the list of messages in the response
     res.status(200).json({
       currentUser: req.session.user,
       messages: messages,
-      incoming_user:incoming_user[0],
+      incoming_user: incoming_user[0],
     });
   } catch (error) {
-    console.error('Error fetching chat messages:', error);
-  res.status(500).json({ error: 'Error fetching chat messages' });
+    console.error("Error fetching chat messages:", error);
+    res.status(500).json({ error: "Error fetching chat messages" });
   }
 });
 
-//----------post chat 
+// -------------------   Post Chat   ---------------------->
 app.post("/chat", async (req, res) => {
   const { from, to } = req.query;
   const message = {
@@ -193,32 +199,32 @@ app.post("/chat", async (req, res) => {
     outgoing_msg_id: from,
     incoming_msg_id: to,
   };
-  
+
   try {
     if (!message.msg || message.msg.trim() === "") {
       return res.status(204).json({ error: "Message cannot be empty" });
     }
 
     const [incoming_user] = await connection.query(
-      'SELECT * FROM users WHERE user_id = ?', [to]
+      "SELECT * FROM users WHERE user_id = ?",
+      [to]
     );
-  
+
     const result = await connection.query(
       "INSERT INTO messages (outgoing_msg_id, incoming_msg_id, msg) VALUES (?, ?, ?)",
       [message.outgoing_msg_id, message.incoming_msg_id, message.msg]
     );
-    
-    console.log('Message stored in database:', result);
 
-    res.status(200).json({ incoming_user:incoming_user[0],message:message});
+    console.log("Message stored in database:", result);
+
+    res.status(200).json({ incoming_user: incoming_user[0], message: message });
   } catch (error) {
-    console.error('Error sending message:', error);
-    res.status(500).json({ error: 'Error sending message' });
+    console.error("Error sending message:", error);
+    res.status(500).json({ error: "Error sending message" });
   }
 });
 
-  
-// Updated user_exists function
+// -------------------   User Exists Function   ---------------------->
 async function user_exists(user) {
   const [rows] = await connection.query("SELECT * FROM users WHERE email = ?", [
     user.email,
@@ -234,29 +240,54 @@ async function user_exists(user) {
   }
 }
 
-//----connect and disconnect socket---
-io.on('connection', (socket) => {
-  console.log('A user connected');
-
-
-  socket.on('disconnect', () => {
-    console.log('A user disconnected');
-  });
-});
-io.on('connection', (socket) => {
-  console.log('A user connected');
-
-  socket.on('resive_message', (message) => {
-    io.emit('sende_message', message); // Broadcast message to all connected clients
-});
-
-  socket.on('disconnect', () => {
-    console.log('A user disconnected');
+// -------------------   Logout   ---------------------->
+app.get("/logout", (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      console.error("Error during logout:", err);
+      return res.status(500).json({ error: "Error during logout" });
+    }
+    res.redirect("/login"); // Redirect to the login page after logout
   });
 });
 
-const port = 5000;
-app.listen(port, () => {
-  console.log(`Server running on Port: ${port} `);
+
+// -------------------   Socket.IO Handling   ---------------------->
+const userStatuses = []; // Use an array to store the status of multiple users
+
+io.on("connection", (socket) => {
+  console.log("A user connected");
+
+  const userId = socket.handshake.query.userId;
+  const userStatus = { userId, status: 'online' };
+  userStatuses.push(userStatus); // Add the new user status to the array
+
+  // Notify other users about the new online user
+  io.emit("user_status", userStatuses);
+
+  socket.on("receive_message", (message) => {
+    io.emit("send_message", message); // Broadcast message to all connected clients
+  });
+
+  socket.on("disconnect", () => {
+    console.log("A user disconnected");
+
+    // Find the index of the user's status and remove it from the array
+    const index = userStatuses.findIndex(status => status.userId === userId);
+    if (index !== -1) {
+      userStatuses.splice(index, 1);      
+      io.emit("user_status", userStatuses); // Notify others of the updated status
+    }
+  });
 });
 
+
+app.use((req, res, next) => {
+  //res.status(404).send('Page Not Found');
+  res.sendFile(path.join(__dirname, "404.html"));
+});
+// -------------------   Start Server   ---------------------->
+const port = 3000;
+server.listen(port, () => {
+  console.log(`Server running on Port: ${port}`);
+});
