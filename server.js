@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-import connection from "./config.js";
+import connection from "./database/config.js";
 import bcrypt from "bcrypt";
 import session from "express-session";
 import multer from "multer";
@@ -44,12 +44,12 @@ const upload = multer({ storage: storage });
 
 // Route to serve login page
 app.get("/login", (req, res) => {
-  res.sendFile(path.join(__dirname, "login.html")); // Serve the login.html file
+  res.sendFile(path.join(__dirname, "public/html/login.html")); // Serve the login.html file
 });
 
 // Route to serve signup page
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "signup.html")); // Serve the signup.html file
+  res.sendFile(path.join(__dirname, "public/html/signup.html")); // Serve the signup.html file
 });
 
 // -------------------   Users   ---------------------->
@@ -77,6 +77,30 @@ app.get("/users", async (req, res) => {
     res.status(500).json({ error: "Error getting data" });
   }
 });
+
+app.get('/searchUser',async (req, res) => {
+    const {search} = req.query
+    console.log("Search Term:", search);
+
+    try {
+      const currentUserEmail = req.session.user.email;
+      const searchQuery = `%${search}%`;
+    
+      const [rows] = await connection.query(
+        "SELECT * FROM users WHERE email != ? AND (firstname LIKE ? OR lastname LIKE ?)",
+        [currentUserEmail, searchQuery, searchQuery]
+      );
+      console.log("search Result: ",rows);
+      
+      res.status(200).json({
+        currentUser: req.session.user,
+        users:rows,
+      })
+    } catch (error) {
+      console.log("Error getting data:", error);
+      res.status(500).json({ error: "Error getting data" });
+    }
+})
 
 // -------------------   Sign Up   ---------------------->
 app.post("/", upload.single("image"), async (req, res) => {
@@ -112,7 +136,7 @@ app.post("/", upload.single("image"), async (req, res) => {
       [data.firstname, data.lastname, data.email, data.password, data.image]
     );
     console.log("Data inserted successfully");
-    res.sendFile(path.join(__dirname, "login.html")); // Serve the login.html file
+    res.sendFile(path.join(__dirname, "public/html/login.html")); // Serve the login.html file
   } catch (error) {
     console.error("Error inserting data:", error);
     res.status(500).json({ error: "Error inserting data" });
@@ -159,9 +183,9 @@ app.get("/chat", async (req, res) => {
     return res.status(400).json({ error: "Missing 'from' or 'to' parameter" });
   }
   // Check if 'from' and 'to' are numbers and not null
-if (isNaN(from) || isNaN(to)) {
-  return res.status(422).json({ error: "'from' and 'to' must be valid numbers" });
-}
+  if (isNaN(from) || isNaN(to)) {
+    return res.status(422).json({ error: "'from' and 'to' must be valid numbers" });
+  }
 
   try {
     const [messages] = await connection.query(
@@ -177,7 +201,7 @@ if (isNaN(from) || isNaN(to)) {
       [to]
     );
     if (incoming_user.length === 0) {
-      return res.status(404).json({ error: "incoming user not found" });
+      return res.status(404).json({ error: "Route not found" });
     }
     // Send the current user and the list of messages in the response
     res.status(200).json({
@@ -199,24 +223,19 @@ app.post("/chat", async (req, res) => {
     outgoing_msg_id: from,
     incoming_msg_id: to,
   };
-
   try {
     if (!message.msg || message.msg.trim() === "") {
       return res.status(204).json({ error: "Message cannot be empty" });
     }
-
     const [incoming_user] = await connection.query(
       "SELECT * FROM users WHERE user_id = ?",
       [to]
     );
-
     const result = await connection.query(
       "INSERT INTO messages (outgoing_msg_id, incoming_msg_id, msg) VALUES (?, ?, ?)",
       [message.outgoing_msg_id, message.incoming_msg_id, message.msg]
     );
-
     console.log("Message stored in database:", result);
-
     res.status(200).json({ incoming_user: incoming_user[0], message: message });
   } catch (error) {
     console.error("Error sending message:", error);
@@ -224,6 +243,38 @@ app.post("/chat", async (req, res) => {
   }
 });
 
+app.get("/lmessage",async (req, res) =>{
+  const { from, to } = req.query;
+  console.log('from: ', from,'  to : ',to);
+  
+  // chek if user is authorized
+  if (!req.session.user || from != req.session.user.user_id) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  //Check if 'from' and 'to' are exist
+  if (from === null || to === null) {
+    return res.status(400).json({ error: "Missing 'from' or 'to' parameter" });
+  }
+  // Check if 'from' and 'to' are numbers and not null
+  if (isNaN(from) || isNaN(to)) {
+    return res.status(422).json({ error: "'from' and 'to' must be valid numbers" });
+  }
+  try { 
+    const lmessage = await connection.query(
+      `SELECT * FROM messages
+             WHERE (outgoing_msg_id = ? AND incoming_msg_id = ?) 
+                OR (incoming_msg_id = ? AND outgoing_msg_id = ? ) ORDER BY time DESC LIMIT 1`,
+      [from, to, from, to]
+    );
+    console.log("message ",lmessage[0][0]);
+    res.status(200).json({
+      lmessage: lmessage[0][0],
+    });
+  } catch (error) {
+    console.error("Error fetching chat messages:", error);
+    res.status(500).json({ error: "Error fetching chat messages" });
+  }
+})
 // -------------------   User Exists Function   ---------------------->
 async function user_exists(user) {
   const [rows] = await connection.query("SELECT * FROM users WHERE email = ?", [
@@ -247,9 +298,11 @@ app.get("/logout", (req, res) => {
       console.error("Error during logout:", err);
       return res.status(500).json({ error: "Error during logout" });
     }
-    res.redirect("/login"); // Redirect to the login page after logout
+    res.redirect("/html/login.html"); // Redirect to the login page after logout
   });
 });
+
+
 
 
 // -------------------   Socket.IO Handling   ---------------------->
@@ -275,7 +328,7 @@ io.on("connection", (socket) => {
     // Find the index of the user's status and remove it from the array
     const index = userStatuses.findIndex(status => status.userId === userId);
     if (index !== -1) {
-      userStatuses.splice(index, 1);      
+      userStatuses.splice(index, 1);
       io.emit("user_status", userStatuses); // Notify others of the updated status
     }
   });
@@ -284,7 +337,7 @@ io.on("connection", (socket) => {
 
 app.use((req, res, next) => {
   //res.status(404).send('Page Not Found');
-  res.sendFile(path.join(__dirname, "404.html"));
+  res.sendFile(path.join(__dirname, "public/html/404.html"));
 });
 // -------------------   Start Server   ---------------------->
 const port = 3000;
